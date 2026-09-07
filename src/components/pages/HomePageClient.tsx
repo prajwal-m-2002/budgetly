@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { TrendingDown, TrendingUp, Wallet, Plus, LogOut, Settings, RefreshCw } from "lucide-react";
+import {
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  Plus,
+  LogOut,
+  Settings,
+  RefreshCw,
+  CalendarDays,
+  ArrowRight,
+  Loader2,
+  ChevronDown,
+} from "lucide-react";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { TransactionModal } from "@/components/transactions/TransactionModal";
 import { TransactionList } from "@/components/transactions/TransactionList";
@@ -11,24 +23,19 @@ import { BudgetProgressCard } from "@/components/dashboard/BudgetProgressCard";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
   getTransactions,
+  getActiveTransactionCount,
   getDashboardSummary,
   softDeleteTransaction,
   restoreTransaction,
 } from "@/lib/supabase/transactions";
 import { getCategories } from "@/lib/supabase/categories";
+import { getCurrentMonthRange, formatINR, isDateInRange } from "@/lib/dateUtils";
 import type { Transaction, DashboardSummary } from "@/types/database";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-function formatINR(amount: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Math.abs(amount));
-}
+const PAGE_SIZE = 50;
 
 function SummaryCard({
   label,
@@ -39,29 +46,54 @@ function SummaryCard({
   label: string;
   amount: number;
   icon: React.ElementType;
-  variant: "expense" | "income" | "balance";
+  variant: "expense" | "income" | "wallet";
 }) {
-  const isNegativeBalance = variant === "balance" && amount < 0;
-  const effectiveVariant = isNegativeBalance ? "expense" : variant === "balance" ? "income" : variant;
+  const isNegative = variant === "wallet" && amount < 0;
 
   const styles = {
-    expense: { container: "border-expense/20", icon: "bg-expense-muted text-expense", amount: "text-expense" },
-    income:  { container: "border-income/20",  icon: "bg-income-muted text-income",   amount: "text-income"  },
+    expense: {
+      container: "border-expense/25 bg-card hover:border-expense/40",
+      icon: "bg-expense-muted text-expense",
+      amount: "text-expense",
+    },
+    income: {
+      container: "border-income/25 bg-card hover:border-income/40",
+      icon: "bg-income-muted text-income",
+      amount: "text-income",
+    },
+    negativeWallet: {
+      container: "border-expense/30 bg-card hover:border-expense/50",
+      icon: "bg-expense-muted text-expense",
+      amount: "text-expense",
+    },
+    positiveWallet: {
+      container: "border-income/25 bg-card hover:border-income/40",
+      icon: "bg-income-muted text-income",
+      amount: "text-income",
+    },
   };
-  const s = styles[effectiveVariant];
+
+  const s =
+    variant === "expense"
+      ? styles.expense
+      : variant === "income"
+      ? styles.income
+      : isNegative
+      ? styles.negativeWallet
+      : styles.positiveWallet;
 
   return (
-    <div className={cn("bg-card border rounded-2xl p-3 sm:p-4 flex flex-col gap-2 shadow-sm", s.container)}>
+    <div className={cn("border rounded-2xl p-3 sm:p-4 flex flex-col gap-2 shadow-sm transition-all", s.container)}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] sm:text-xs font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+        <span className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wide leading-tight">
           {label}
         </span>
         <div className={cn("w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center flex-shrink-0", s.icon)}>
-          <Icon size={12} />
+          <Icon size={13} />
         </div>
       </div>
       <p className={cn("text-sm sm:text-base font-bold leading-none tabular-nums", s.amount)}>
-        {variant === "expense" ? "" : variant === "income" ? "" : amount < 0 ? "−" : ""}
+        {variant === "wallet" && amount < 0 ? "−" : ""}
         {formatINR(amount)}
       </p>
     </div>
@@ -72,10 +104,15 @@ export function HomePageClient() {
   const { user, signOut } = useAuth();
   const router = useRouter();
 
+  // Current month dynamic calculations for summary cards
+  const monthRange = getCurrentMonthRange();
+
   // Data state
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [summary, setSummary] = useState<DashboardSummary>({ totalExpense: 0, totalIncome: 0, balance: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -87,7 +124,9 @@ export function HomePageClient() {
 
   // Undo toast state
   const [undoToast, setUndoToast] = useState<{ visible: boolean; txnId: string; label: string }>({
-    visible: false, txnId: "", label: "",
+    visible: false,
+    txnId: "",
+    label: "",
   });
 
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "there";
@@ -95,14 +134,26 @@ export function HomePageClient() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  // Initial load: current month summary + all-months recent transactions
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // Ensure categories exist and fetch transactions + summary
+      // Ensure categories exist
       await getCategories().catch((e) => console.warn("Category check:", e));
-      const [txns, sum] = await Promise.all([getTransactions(50), getDashboardSummary()]);
-      setTransactions(txns);
+
+      // Dynamic current month boundary for summary calculations only
+      const currentMonth = getCurrentMonthRange();
+
+      // Parallel fetch: Monthly Summary (current month) + Recent Transactions (all months, newest first) + Total Count
+      const [sum, txns, count] = await Promise.all([
+        getDashboardSummary(currentMonth.from, currentMonth.to),
+        getTransactions(PAGE_SIZE, 0),
+        getActiveTransactionCount(),
+      ]);
+
       setSummary(sum);
+      setTransactions(txns);
+      setTotalCount(count);
     } catch (err) {
       console.error("Failed to load data:", err);
     } finally {
@@ -110,7 +161,27 @@ export function HomePageClient() {
     }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Load more historical transactions
+  async function handleLoadMore() {
+    if (loadingMore || transactions.length >= totalCount) return;
+    setLoadingMore(true);
+    try {
+      const nextBatch = await getTransactions(PAGE_SIZE, transactions.length);
+      setTransactions((prev) => {
+        const existingIds = new Set(prev.map((t) => t.id));
+        const newItems = nextBatch.filter((t) => !existingIds.has(t.id));
+        return [...prev, ...newItems];
+      });
+    } catch (err) {
+      console.error("Failed to load more transactions:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function handleSignOut() {
     await signOut();
@@ -118,9 +189,17 @@ export function HomePageClient() {
     router.refresh();
   }
 
-  function openAdd() { setEditTarget(null); setModalOpen(true); }
-  function openEdit(t: Transaction) { setEditTarget(t); setModalOpen(true); }
-  function openDelete(t: Transaction) { setDeleteTarget(t); }
+  function openAdd() {
+    setEditTarget(null);
+    setModalOpen(true);
+  }
+  function openEdit(t: Transaction) {
+    setEditTarget(t);
+    setModalOpen(true);
+  }
+  function openDelete(t: Transaction) {
+    setDeleteTarget(t);
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -129,14 +208,26 @@ export function HomePageClient() {
       await softDeleteTransaction(deleteTarget.id);
       const deleted = deleteTarget;
       setDeleteTarget(null);
+
+      // Remove from Recent Transactions list
       setTransactions((prev) => prev.filter((t) => t.id !== deleted.id));
-      // Recalculate summary
-      setSummary((prev) => {
-        const amt = deleted.amount;
-        return deleted.type === "expense"
-          ? { ...prev, totalExpense: prev.totalExpense - amt, balance: prev.balance + amt }
-          : { ...prev, totalIncome: prev.totalIncome - amt, balance: prev.balance - amt };
-      });
+      setTotalCount((c) => Math.max(0, c - 1));
+
+      // If deleted transaction is in the current month, recalculate current-month summary cards
+      const currentMonth = getCurrentMonthRange();
+      if (isDateInRange(deleted.date, currentMonth.from, currentMonth.to)) {
+        const amt = Number(deleted.amount) || 0;
+        setSummary((prev) => {
+          if (deleted.type === "expense") {
+            const newExp = prev.totalExpense - amt;
+            return { ...prev, totalExpense: newExp, balance: prev.totalIncome - newExp };
+          } else {
+            const newInc = prev.totalIncome - amt;
+            return { ...prev, totalIncome: newInc, balance: newInc - prev.totalExpense };
+          }
+        });
+      }
+
       // Show undo
       setUndoToast({ visible: true, txnId: deleted.id, label: `"${deleted.description}" deleted` });
     } catch (err) {
@@ -151,25 +242,42 @@ export function HomePageClient() {
     setUndoToast((p) => ({ ...p, visible: false }));
     try {
       await restoreTransaction(undoToast.txnId);
-      await loadData(); // Refresh to show restored transaction
+      await loadData(); // Refresh to show restored transaction and updated summary
     } catch (err) {
       console.error(err);
     }
   }
 
+  const hasMore = transactions.length < totalCount;
+
   return (
     <div className="px-4 py-6 max-w-3xl mx-auto lg:max-w-none lg:px-8 lg:py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start sm:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground leading-tight">
-            {greeting}, {firstName} 👋
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground leading-tight">
+              {greeting}, {firstName} 👋
+            </h1>
+            <span
+              id="current-month-badge"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-accent/10 text-accent border border-accent/20"
+              title="Current Monthly Summary Period"
+            >
+              <CalendarDays size={12} />
+              {monthRange.label}
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            {new Date().toLocaleDateString("en-IN", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-income-muted text-income text-xs font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-income animate-pulse" />
             Synced
@@ -184,17 +292,26 @@ export function HomePageClient() {
           </button>
           <ThemeToggle />
           <div className="lg:hidden flex items-center gap-1">
-            <Link href="/settings" aria-label="Settings" className="w-9 h-9 rounded-xl flex items-center justify-center bg-muted text-muted-foreground hover:text-foreground transition-all">
+            <Link
+              href="/settings"
+              aria-label="Settings"
+              className="w-9 h-9 rounded-xl flex items-center justify-center bg-muted text-muted-foreground hover:text-foreground transition-all"
+            >
               <Settings size={16} />
             </Link>
-            <button id="mobile-sign-out" onClick={handleSignOut} aria-label="Sign out" className="w-9 h-9 rounded-xl flex items-center justify-center bg-muted text-muted-foreground hover:text-expense transition-all">
+            <button
+              id="mobile-sign-out"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              className="w-9 h-9 rounded-xl flex items-center justify-center bg-muted text-muted-foreground hover:text-expense transition-all"
+            >
               <LogOut size={16} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards — Current Month Only */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-8">
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
@@ -202,33 +319,63 @@ export function HomePageClient() {
           ))
         ) : (
           <>
-            <SummaryCard label="Expense" amount={summary.totalExpense} icon={TrendingDown} variant="expense" />
-            <SummaryCard label="Income"  amount={summary.totalIncome}  icon={TrendingUp}  variant="income"  />
-            <SummaryCard label="Balance" amount={summary.balance}      icon={Wallet}      variant="balance" />
+            <SummaryCard
+              label="Total Expense"
+              amount={summary.totalExpense}
+              icon={TrendingDown}
+              variant="expense"
+            />
+            <SummaryCard
+              label="Total Income"
+              amount={summary.totalIncome}
+              icon={TrendingUp}
+              variant="income"
+            />
+            <SummaryCard
+              label="Total Wallet"
+              amount={summary.balance}
+              icon={Wallet}
+              variant="wallet"
+            />
           </>
         )}
       </div>
 
-      {/* Monthly Budget Tracker */}
+      {/* Monthly Budget Tracker — Tracks Current Month Expenses */}
       {!loading && (
         <BudgetProgressCard
-          currentMonthlyExpense={transactions
-            .filter(
-              (t) =>
-                t.type === "expense" &&
-                t.date.startsWith(new Date().toISOString().slice(0, 7))
-            )
-            .reduce((s, t) => s + Number(t.amount), 0)}
+          currentMonthlyExpense={summary.totalExpense}
+          year={monthRange.year}
+          month={monthRange.month}
         />
       )}
 
-      {/* Recent Transactions */}
-      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
+      {/* Recent Transactions — All Months History */}
+      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden mb-8">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Recent Transactions</h2>
-          <span className="text-xs text-muted-foreground">
-            {transactions.length > 0 ? `${transactions.length} total` : ""}
-          </span>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Recent Transactions</h2>
+            <p className="text-[11px] text-muted-foreground">
+              {loading ? (
+                "Loading transactions..."
+              ) : totalCount > 0 ? (
+                totalCount > transactions.length ? (
+                  `Showing latest ${transactions.length} of ${totalCount} transactions`
+                ) : (
+                  `${totalCount} transaction${totalCount !== 1 ? "s" : ""}`
+                )
+              ) : (
+                "All history"
+              )}
+            </p>
+          </div>
+          <Link
+            href="/analysis"
+            className="text-xs font-semibold text-accent hover:underline flex items-center gap-1 group"
+          >
+            <span>History</span>
+            <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+          </Link>
         </div>
 
         {loading ? (
@@ -244,12 +391,51 @@ export function HomePageClient() {
               </div>
             ))}
           </div>
+        ) : transactions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-14 text-center px-4">
+            <div className="text-4xl mb-3">🧾</div>
+            <h3 className="text-sm font-semibold text-foreground mb-1">No transactions recorded yet</h3>
+            <p className="text-xs text-muted-foreground max-w-xs mb-4">
+              Tap <span className="font-semibold text-accent">+</span> to add your first expense or income.
+            </p>
+            <button
+              onClick={openAdd}
+              className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-semibold shadow-sm hover:bg-accent/90 transition-all"
+            >
+              + Add Transaction
+            </button>
+          </div>
         ) : (
-          <TransactionList
-            transactions={transactions}
-            onEdit={openEdit}
-            onDelete={openDelete}
-          />
+          <div>
+            <TransactionList
+              transactions={transactions}
+              onEdit={openEdit}
+              onDelete={openDelete}
+            />
+
+            {/* Load More Button for Complete History */}
+            {hasMore && (
+              <div className="p-4 border-t border-border flex justify-center bg-card">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="px-5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {loadingMore ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin text-accent" />
+                      Loading older transactions...
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={14} />
+                      Load More Transactions ({totalCount - transactions.length} remaining)
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

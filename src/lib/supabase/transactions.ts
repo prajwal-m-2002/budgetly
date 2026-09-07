@@ -6,8 +6,8 @@ import type {
   DashboardSummary,
 } from "@/types/database";
 
-/** Fetch active (non-deleted) transactions, newest first, with category join */
-export async function getTransactions(limit = 50): Promise<Transaction[]> {
+/** Fetch active (non-deleted) transactions across all history, newest first, with pagination support */
+export async function getTransactions(limit = 50, offset = 0): Promise<Transaction[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("transactions")
@@ -15,7 +15,7 @@ export async function getTransactions(limit = 50): Promise<Transaction[]> {
     .is("deleted_at", null)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit - 1);
 
   if (error) {
     console.warn("getTransactions primary query error, attempting fallback:", error.message || error);
@@ -26,7 +26,7 @@ export async function getTransactions(limit = 50): Promise<Transaction[]> {
       .is("deleted_at", null)
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (fallbackError) {
       console.error("getTransactions fallback error:", fallbackError);
@@ -35,6 +35,21 @@ export async function getTransactions(limit = 50): Promise<Transaction[]> {
     return (fallback as Transaction[]) ?? [];
   }
   return data ?? [];
+}
+
+/** Get total count of active non-deleted transactions across all history */
+export async function getActiveTransactionCount(): Promise<number> {
+  const supabase = createClient();
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .is("deleted_at", null);
+
+  if (error) {
+    console.warn("getActiveTransactionCount error:", error);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 /** Fetch transactions within a date range */
@@ -64,6 +79,36 @@ export async function getTransactionsByRange(
       .order("created_at", { ascending: false });
 
     if (fallbackError) throw fallbackError;
+    return (fallback as Transaction[]) ?? [];
+  }
+  return data ?? [];
+}
+
+/** Fetch all active (non-deleted) transactions without restrictive limits for historical analysis */
+export async function getAllActiveTransactions(limit = 2000): Promise<Transaction[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("*, categories(*)")
+    .is("deleted_at", null)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.warn("getAllActiveTransactions primary query error, attempting fallback:", error.message || error);
+    const { data: fallback, error: fallbackError } = await supabase
+      .from("transactions")
+      .select("*")
+      .is("deleted_at", null)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (fallbackError) {
+      console.error("getAllActiveTransactions fallback error:", fallbackError);
+      throw fallbackError;
+    }
     return (fallback as Transaction[]) ?? [];
   }
   return data ?? [];
@@ -147,13 +192,22 @@ export async function restoreTransaction(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Calculate dashboard summary totals */
-export async function getDashboardSummary(): Promise<DashboardSummary> {
+/** Calculate dashboard summary totals for a given date range (or all active if unconstrained) */
+export async function getDashboardSummary(from?: string, to?: string): Promise<DashboardSummary> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("transactions")
-    .select("type, amount")
+    .select("type, amount, date")
     .is("deleted_at", null);
+
+  if (from) {
+    query = query.gte("date", from);
+  }
+  if (to) {
+    query = query.lte("date", to);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("getDashboardSummary query error:", error);

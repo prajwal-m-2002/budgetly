@@ -44,10 +44,20 @@ export interface TransactionInsert {
   recurring_interval?: RecurringInterval | null;
 }
 
-export interface TransactionUpdate extends Partial<TransactionInsert> {}
+export type TransactionUpdate = Partial<TransactionInsert>;
 
 export interface DashboardSummary {
   totalExpense: number;
   totalIncome: number;
   balance: number;
+}
+
+export interface MonthlyBudget {
+  id: string;
+  user_id: string;
+  year: number;
+  month: number;
+  budget_amount: number;
+  created_at: string;
+  updated_at: string;
 }

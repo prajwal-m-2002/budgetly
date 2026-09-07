@@ -14,22 +14,14 @@ import {
   Wallet,
   ArrowDownToLine,
 } from "lucide-react";
-import { getTransactionsByRange, getTransactions } from "@/lib/supabase/transactions";
+import { getTransactionsByRange, getAllActiveTransactions } from "@/lib/supabase/transactions";
 import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/export";
+import { getCurrentMonthRange, getPreviousMonthRange, getCurrentYearRange, formatINR, toISODateString } from "@/lib/dateUtils";
 import { useAuth } from "@/components/providers/AuthProvider";
 import type { Transaction, TransactionType } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 type DateFilterOption = "this_month" | "last_month" | "30_days" | "90_days" | "this_year" | "all" | "custom";
-
-function formatINR(amount: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Math.abs(amount));
-}
 
 export function ExportPageClient() {
   const { user } = useAuth();
@@ -45,41 +37,33 @@ export function ExportPageClient() {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const calculateRangeDates = useCallback((): { from?: string; to?: string; label: string } => {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
     if (dateFilter === "this_month") {
-      const from = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-      const to = fmt(now);
-      return { from, to, label: `${now.toLocaleString("en-IN", { month: "long" })} ${now.getFullYear()}` };
+      const cur = getCurrentMonthRange();
+      return { from: cur.from, to: cur.to, label: cur.label };
     }
 
     if (dateFilter === "last_month") {
-      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
-      return {
-        from: fmt(prevMonth),
-        to: fmt(lastDay),
-        label: `${prevMonth.toLocaleString("en-IN", { month: "long" })} ${prevMonth.getFullYear()}`,
-      };
+      const prev = getPreviousMonthRange();
+      return { from: prev.from, to: prev.to, label: prev.label };
     }
 
     if (dateFilter === "30_days") {
+      const now = new Date();
       const past = new Date();
       past.setDate(past.getDate() - 30);
-      return { from: fmt(past), to: fmt(now), label: "Last 30 Days" };
+      return { from: toISODateString(past), to: toISODateString(now), label: "Last 30 Days" };
     }
 
     if (dateFilter === "90_days") {
+      const now = new Date();
       const past = new Date();
       past.setDate(past.getDate() - 90);
-      return { from: fmt(past), to: fmt(now), label: "Last 90 Days" };
+      return { from: toISODateString(past), to: toISODateString(now), label: "Last 90 Days" };
     }
 
     if (dateFilter === "this_year") {
-      const from = `${now.getFullYear()}-01-01`;
-      return { from, to: fmt(now), label: `Year ${now.getFullYear()}` };
+      const yr = getCurrentYearRange();
+      return { from: yr.from, to: yr.to, label: yr.label };
     }
 
     if (dateFilter === "custom" && customFrom && customTo) {
@@ -98,7 +82,7 @@ export function ExportPageClient() {
       if (from && to) {
         data = await getTransactionsByRange(from, to);
       } else {
-        data = await getTransactions(500);
+        data = await getAllActiveTransactions();
       }
 
       setTransactions(data);
@@ -121,10 +105,10 @@ export function ExportPageClient() {
 
   const totalExpense = filteredTransactions
     .filter((t) => t.type === "expense")
-    .reduce((s, t) => s + Number(t.amount), 0);
+    .reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const totalIncome = filteredTransactions
     .filter((t) => t.type === "income")
-    .reduce((s, t) => s + Number(t.amount), 0);
+    .reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const balance = totalIncome - totalExpense;
 
   const summary = { totalExpense, totalIncome, balance };
@@ -142,7 +126,7 @@ export function ExportPageClient() {
     }
 
     setExportingType(format);
-    const dateSlug = new Date().toISOString().split("T")[0];
+    const dateSlug = toISODateString();
 
     try {
       if (format === "excel") {
