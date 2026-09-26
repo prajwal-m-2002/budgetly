@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, BarChart2, Download, Settings, LogOut } from "lucide-react";
+import { Home, Landmark, BarChart2, Download, Settings, LogOut } from "lucide-react";
 import { BudgetlyLogo } from "@/components/brand/BudgetlyLogo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Home", icon: Home },
+  { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/analysis", label: "Analysis", icon: BarChart2 },
   { href: "/export", label: "Export", icon: Download },
 ];

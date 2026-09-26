@@ -184,27 +184,42 @@ export function computeAnalyticsFromTransactions(
 }
 
 /**
- * Fetch analytics data from Supabase according to date boundaries.
+ * Fetch analytics data from Supabase according to date boundaries and optional account filtering.
+ * Defaults to "MAIN" account scope to preserve existing behavior.
  */
-export async function getAnalyticsData(from?: string, to?: string): Promise<AnalyticsData> {
+export async function getAnalyticsData(
+  from?: string,
+  to?: string,
+  accountId?: string | "MAIN" | "ALL"
+): Promise<AnalyticsData> {
   // Always fetch all active transactions to build the complete monthly history summary
   const allHistorical = await getAllActiveTransactions();
 
+  // Filter transactions by account scope
+  const accountFilteredHistorical = allHistorical.filter((t) => {
+    if (!accountId || accountId === "ALL") return true;
+    if (accountId === "MAIN") {
+      // Main account or unassigned legacy
+      return !t.accounts || t.accounts.type === "MAIN" || !t.account_id;
+    }
+    // Specific account ID
+    return t.account_id === accountId;
+  });
+
   let filteredTransactions: Transaction[];
   if (from && to) {
-    // If range matches cached or we can filter in-memory from allHistorical
-    filteredTransactions = allHistorical.filter(
+    filteredTransactions = accountFilteredHistorical.filter(
       (t) => t.date && t.date >= from && t.date <= to
     );
   } else if (from) {
-    filteredTransactions = allHistorical.filter((t) => t.date && t.date >= from);
+    filteredTransactions = accountFilteredHistorical.filter((t) => t.date && t.date >= from);
   } else if (to) {
-    filteredTransactions = allHistorical.filter((t) => t.date && t.date <= to);
+    filteredTransactions = accountFilteredHistorical.filter((t) => t.date && t.date <= to);
   } else {
-    filteredTransactions = allHistorical;
+    filteredTransactions = accountFilteredHistorical;
   }
 
-  return computeAnalyticsFromTransactions(filteredTransactions, allHistorical);
+  return computeAnalyticsFromTransactions(filteredTransactions, accountFilteredHistorical);
 }
 
 /**

@@ -27,15 +27,23 @@ import {
   getDashboardSummary,
   softDeleteTransaction,
   restoreTransaction,
+  getAllActiveTransactions,
 } from "@/lib/supabase/transactions";
 import { getCategories } from "@/lib/supabase/categories";
+import { getAccounts } from "@/lib/supabase/accounts";
 import { getCurrentMonthRange, formatINR, isDateInRange } from "@/lib/dateUtils";
-import type { Transaction, DashboardSummary } from "@/types/database";
+import type { Transaction, DashboardSummary, Account } from "@/types/database";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
+
+interface AccountTotal {
+  account: Account;
+  totalExpense: number;
+  totalIncome: number;
+}
 
 function SummaryCard({
   label,
@@ -111,6 +119,7 @@ export function HomePageClient() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [summary, setSummary] = useState<DashboardSummary>({ totalExpense: 0, totalIncome: 0, balance: 0 });
+  const [accountTotals, setAccountTotals] = useState<AccountTotal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -134,26 +143,57 @@ export function HomePageClient() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  // Initial load: current month summary + all-months recent transactions
+  // Initial load: current month summary (Main Account only) + all-months recent transactions + account summary
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // Ensure categories exist
-      await getCategories().catch((e) => console.warn("Category check:", e));
+      // Ensure categories and accounts exist
+      await Promise.all([
+        getCategories().catch((e) => console.warn("Category check:", e)),
+        getAccounts().catch((e) => console.warn("Account check:", e)),
+      ]);
 
-      // Dynamic current month boundary for summary calculations only
+      // Dynamic current month boundary for summary calculations
       const currentMonth = getCurrentMonthRange();
 
-      // Parallel fetch: Monthly Summary (current month) + Recent Transactions (all months, newest first) + Total Count
-      const [sum, txns, count] = await Promise.all([
-        getDashboardSummary(currentMonth.from, currentMonth.to),
+      // Parallel fetch: Monthly Summary (Main Account only) + Recent Transactions + Total Count + Accounts
+      const [sum, txns, count, allAccounts, allTxns] = await Promise.all([
+        getDashboardSummary(currentMonth.from, currentMonth.to, "MAIN"),
         getTransactions(PAGE_SIZE, 0),
         getActiveTransactionCount(),
+        getAccounts(),
+        getAllActiveTransactions(),
       ]);
+
+      // Compute account-wise totals across all transactions
+      const mainAcc = allAccounts.find((a) => a.type === "MAIN") || allAccounts[0];
+      const accTotals: AccountTotal[] = allAccounts.map((acc) => {
+        const isMain = acc.type === "MAIN" || (mainAcc && acc.id === mainAcc.id);
+        const accTxns = allTxns.filter((t) => {
+          if (isMain) {
+            return !t.account_id || t.account_id === acc.id || t.accounts?.type === "MAIN";
+          }
+          return t.account_id === acc.id;
+        });
+
+        const totalExpense = accTxns
+          .filter((t) => t.type === "expense")
+          .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totalIncome = accTxns
+          .filter((t) => t.type === "income")
+          .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+        return {
+          account: acc,
+          totalExpense,
+          totalIncome,
+        };
+      });
 
       setSummary(sum);
       setTransactions(txns);
       setTotalCount(count);
+      setAccountTotals(accTotals);
     } catch (err) {
       console.error("Failed to load data:", err);
     } finally {
@@ -213,9 +253,10 @@ export function HomePageClient() {
       setTransactions((prev) => prev.filter((t) => t.id !== deleted.id));
       setTotalCount((c) => Math.max(0, c - 1));
 
-      // If deleted transaction is in the current month, recalculate current-month summary cards
+      // CRITICAL RULE: If deleted transaction belongs to MAIN account AND is in current month, update main summary
+      const isMainTxn = !deleted.accounts || deleted.accounts.type === "MAIN" || !deleted.account_id;
       const currentMonth = getCurrentMonthRange();
-      if (isDateInRange(deleted.date, currentMonth.from, currentMonth.to)) {
+      if (isMainTxn && isDateInRange(deleted.date, currentMonth.from, currentMonth.to)) {
         const amt = Number(deleted.amount) || 0;
         setSummary((prev) => {
           if (deleted.type === "expense") {
@@ -230,6 +271,8 @@ export function HomePageClient() {
 
       // Show undo
       setUndoToast({ visible: true, txnId: deleted.id, label: `"${deleted.description}" deleted` });
+      // Refresh background account totals
+      loadData();
     } catch (err) {
       console.error(err);
     } finally {
@@ -242,13 +285,14 @@ export function HomePageClient() {
     setUndoToast((p) => ({ ...p, visible: false }));
     try {
       await restoreTransaction(undoToast.txnId);
-      await loadData(); // Refresh to show restored transaction and updated summary
+      await loadData();
     } catch (err) {
       console.error(err);
     }
   }
 
   const hasMore = transactions.length < totalCount;
+
 
   return (
     <div className="px-4 py-6 max-w-3xl mx-auto lg:max-w-none lg:px-8 lg:py-8">
@@ -348,6 +392,71 @@ export function HomePageClient() {
           year={monthRange.year}
           month={monthRange.month}
         />
+      )}
+
+      {/* Account Summary Section */}
+      {!loading && accountTotals.length > 0 && (
+        <div className="bg-card border border-border rounded-2xl shadow-sm p-4 sm:p-5 mb-8">
+          <div className="flex items-center justify-between mb-3.5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🏦</span>
+              <h2 className="text-sm font-semibold text-foreground">Expense Accounts Summary</h2>
+            </div>
+            <Link
+              href="/accounts"
+              className="text-xs font-semibold text-accent hover:underline flex items-center gap-1 group"
+            >
+              <span>Manage Accounts</span>
+              <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {accountTotals.map((accTot) => {
+              const isMain = accTot.account.type === "MAIN";
+              return (
+                <Link
+                  key={accTot.account.id}
+                  href={`/accounts?id=${accTot.account.id}`}
+                  className="p-3.5 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 transition-all group flex flex-col justify-between"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0"
+                        style={{ backgroundColor: `${accTot.account.color || "#3b82f6"}20` }}
+                      >
+                        {accTot.account.icon || "🏦"}
+                      </div>
+                      <div className="truncate">
+                        <p className="text-xs font-semibold text-foreground truncate">{accTot.account.name}</p>
+                        <span
+                          className={cn(
+                            "text-[10px] font-semibold px-1.5 py-0.5 rounded-md inline-block",
+                            isMain
+                              ? "bg-accent/15 text-accent"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {isMain ? "Main Account" : "Secondary Account"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between text-xs">
+                    <span className="text-[11px] text-muted-foreground">
+                      {isMain ? "Main Expenses:" : "Secondary Expenses:"}
+                    </span>
+                    <span className="font-bold text-expense tabular-nums">
+                      {formatINR(accTot.totalExpense)}
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Recent Transactions — All Months History */}

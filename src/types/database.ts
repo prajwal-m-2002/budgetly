@@ -1,5 +1,28 @@
 export type TransactionType = "expense" | "income";
 export type RecurringInterval = "daily" | "weekly" | "monthly" | "yearly";
+export type AccountType = "MAIN" | "SECONDARY";
+
+export interface Account {
+  id: string;
+  user_id: string;
+  name: string;
+  type: AccountType;
+  icon: string;
+  color: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountInsert {
+  name: string;
+  type: AccountType;
+  icon?: string;
+  color?: string;
+  is_active?: boolean;
+}
+
+export type AccountUpdate = Partial<AccountInsert>;
 
 export interface Category {
   id: string;
@@ -20,6 +43,7 @@ export interface Transaction {
   time: string | null;
   description: string;
   category_id: string | null;
+  account_id?: string | null;
   received_from: string | null;
   note: string | null;
   is_recurring: boolean;
@@ -29,6 +53,7 @@ export interface Transaction {
   deleted_at: string | null;
   // Joined
   categories?: Category | null;
+  accounts?: Account | null;
 }
 
 export interface TransactionInsert {
@@ -38,6 +63,7 @@ export interface TransactionInsert {
   time?: string | null;
   description: string;
   category_id?: string | null;
+  account_id?: string | null;
   received_from?: string | null;
   note?: string | null;
   is_recurring?: boolean;
@@ -61,3 +87,4 @@ export interface MonthlyBudget {
   created_at: string;
   updated_at: string;
 }
+

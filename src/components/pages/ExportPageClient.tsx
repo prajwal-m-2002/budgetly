@@ -18,7 +18,8 @@ import { getTransactionsByRange, getAllActiveTransactions } from "@/lib/supabase
 import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/export";
 import { getCurrentMonthRange, getPreviousMonthRange, getCurrentYearRange, formatINR, toISODateString } from "@/lib/dateUtils";
 import { useAuth } from "@/components/providers/AuthProvider";
-import type { Transaction, TransactionType } from "@/types/database";
+import { getAccounts } from "@/lib/supabase/accounts";
+import type { Transaction, TransactionType, Account } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 type DateFilterOption = "this_month" | "last_month" | "30_days" | "90_days" | "this_year" | "all" | "custom";
@@ -28,10 +29,12 @@ export function ExportPageClient() {
 
   const [dateFilter, setDateFilter] = useState<DateFilterOption>("this_month");
   const [typeFilter, setTypeFilter] = useState<"all" | TransactionType>("all");
+  const [accountFilter, setAccountFilter] = useState<string>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportingType, setExportingType] = useState<"excel" | "pdf" | "csv" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -85,6 +88,8 @@ export function ExportPageClient() {
         data = await getAllActiveTransactions();
       }
 
+      const accs = await getAccounts().catch(() => []);
+      setAccounts(accs);
       setTransactions(data);
     } catch (err) {
       console.error("Export load error:", err);
@@ -97,10 +102,14 @@ export function ExportPageClient() {
     loadData();
   }, [loadData]);
 
-  // Filter by Type (expense, income, all)
+  // Filter by Type (expense, income, all) and Account
   const filteredTransactions = transactions.filter((t) => {
-    if (typeFilter === "all") return true;
-    return t.type === typeFilter;
+    if (typeFilter !== "all" && t.type !== typeFilter) return false;
+    if (accountFilter === "all") return true;
+    if (accountFilter === "main") {
+      return !t.accounts || t.accounts.type === "MAIN" || !t.account_id;
+    }
+    return t.account_id === accountFilter;
   });
 
   const totalExpense = filteredTransactions
@@ -230,7 +239,7 @@ export function ExportPageClient() {
           <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
             Transaction Type
           </label>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {[
               { id: "all", label: "All Transactions" },
               { id: "expense", label: "Expenses Only" },
@@ -251,6 +260,54 @@ export function ExportPageClient() {
             ))}
           </div>
         </div>
+
+        {/* Account Filter */}
+        {accounts.length > 0 && (
+          <div className="pt-2 border-t border-border/60">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
+              Expense Account
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setAccountFilter("all")}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all",
+                  accountFilter === "all"
+                    ? "bg-foreground text-background"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                All Accounts
+              </button>
+              <button
+                onClick={() => setAccountFilter("main")}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all",
+                  accountFilter === "main"
+                    ? "bg-accent text-white shadow-sm shadow-accent/25"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                🏦 Main Account Only
+              </button>
+              {accounts.map((acc) => (
+                <button
+                  key={acc.id}
+                  onClick={() => setAccountFilter(acc.id)}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1",
+                    accountFilter === acc.id
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>{acc.icon || "🏦"}</span>
+                  <span>{acc.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Summary Metrics of Filtered Selection */}

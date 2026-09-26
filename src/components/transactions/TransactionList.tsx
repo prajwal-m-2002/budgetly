@@ -108,6 +108,18 @@ export function TransactionList({ transactions, onEdit, onDelete }: TransactionL
                         {cat.name}
                       </span>
                     )}
+                    {t.accounts && (
+                      <span
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-md flex items-center gap-0.5"
+                        style={{
+                          backgroundColor: `${t.accounts.color || "#3b82f6"}18`,
+                          color: t.accounts.color || "#3b82f6",
+                        }}
+                      >
+                        <span>{t.accounts.icon || "🏦"}</span>
+                        <span>{t.accounts.name}</span>
+                      </span>
+                    )}
                     {t.received_from && (
                       <span className="text-[10px] text-muted-foreground">from {t.received_from}</span>
                     )}

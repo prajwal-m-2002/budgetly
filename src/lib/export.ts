@@ -14,10 +14,11 @@ function formatCurrency(amount: number): string {
 
 /** Export transactions to CSV */
 export function exportToCSV(transactions: Transaction[], filename = "budgetly-transactions.csv") {
-  const headers = ["ID", "Date", "Type", "Category", "Description", "Amount (INR)", "Note", "Received From"];
+  const headers = ["ID", "Date", "Account", "Type", "Category", "Description", "Amount (INR)", "Note", "Received From"];
   const rows = transactions.map((t) => [
     t.id,
     t.date,
+    `"${t.accounts?.name || "Main Account"}"`,
     t.type.toUpperCase(),
     t.categories?.name || "Uncategorized",
     `"${(t.description || "").replace(/"/g, '""')}"`,
@@ -48,6 +49,7 @@ export function exportToExcel(
   const txnData = transactions.map((t, idx) => ({
     "S.No": idx + 1,
     Date: t.date,
+    Account: t.accounts?.name || "Main Account",
     Type: t.type === "expense" ? "Expense" : "Income",
     Category: t.categories?.name || "General",
     Description: t.description,
@@ -182,6 +184,7 @@ export function exportToPDF(
   const tableData = transactions.map((t, idx) => [
     idx + 1,
     t.date,
+    t.accounts?.name || "Main Account",
     t.description,
     t.categories?.name || "General",
     t.type.toUpperCase(),
@@ -190,7 +193,7 @@ export function exportToPDF(
 
   autoTable(doc, {
     startY: 82,
-    head: [["#", "Date", "Description", "Category", "Type", "Amount (INR)"]],
+    head: [["#", "Date", "Account", "Description", "Category", "Type", "Amount (INR)"]],
     body: tableData,
     theme: "striped",
     headStyles: {
@@ -200,20 +203,21 @@ export function exportToPDF(
       fontSize: 9,
     },
     styles: {
-      fontSize: 8.5,
-      cellPadding: 3,
+      fontSize: 8,
+      cellPadding: 2.5,
       textColor: [51, 65, 85],
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: "center" },
-      1: { cellWidth: 24 },
-      2: { cellWidth: "auto" },
-      3: { cellWidth: 32 },
-      4: { cellWidth: 22, halign: "center" },
-      5: { cellWidth: 35, halign: "right", fontStyle: "bold" },
+      0: { cellWidth: 8, halign: "center" },
+      1: { cellWidth: 22 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: "auto" },
+      4: { cellWidth: 26 },
+      5: { cellWidth: 18, halign: "center" },
+      6: { cellWidth: 32, halign: "right", fontStyle: "bold" },
     },
     didParseCell: (data) => {
-      if (data.section === "body" && data.column.index === 5) {
+      if (data.section === "body" && data.column.index === 6) {
         const text = String(data.cell.raw);
         if (text.startsWith("+")) {
           data.cell.styles.textColor = [16, 185, 129];

@@ -5,13 +5,15 @@ import { X, AlertCircle, Plus } from "lucide-react";
 import { CategoryPicker } from "@/components/transactions/CategoryPicker";
 import { createTransaction, updateTransaction } from "@/lib/supabase/transactions";
 import { getCategories, createCategory } from "@/lib/supabase/categories";
-import type { Transaction, TransactionType, Category } from "@/types/database";
+import { getAccounts } from "@/lib/supabase/accounts";
+import type { Transaction, TransactionType, Category, Account } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 interface TransactionModalProps {
   open: boolean;
   editTransaction?: Transaction | null;
   defaultType?: TransactionType;
+  defaultAccountId?: string;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -30,6 +32,7 @@ export function TransactionModal({
   open,
   editTransaction,
   defaultType = "expense",
+  defaultAccountId,
   onClose,
   onSaved,
 }: TransactionModalProps) {
@@ -42,8 +45,12 @@ export function TransactionModal({
   const [time, setTime]               = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId]   = useState<string | null>(null);
+  const [accountId, setAccountId]     = useState<string>("");
   const [receivedFrom, setReceivedFrom] = useState("");
   const [note, setNote]               = useState("");
+
+  // Accounts
+  const [accounts, setAccounts]       = useState<Account[]>([]);
 
   // Categories
   const [categories, setCategories]   = useState<Category[]>([]);
@@ -60,6 +67,31 @@ export function TransactionModal({
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState<string | null>(null);
 
+  // Load accounts and categories
+  useEffect(() => {
+    if (!open) return;
+    setLoadingCats(true);
+    Promise.all([
+      getCategories().catch(() => []),
+      getAccounts().catch(() => []),
+    ]).then(([cats, accs]) => {
+      setCategories(cats);
+      setAccounts(accs);
+
+      // Default account selection logic
+      if (!editTransaction) {
+        if (defaultAccountId) {
+          setAccountId(defaultAccountId);
+        } else {
+          const main = accs.find((a) => a.type === "MAIN") || accs[0];
+          if (main) setAccountId(main.id);
+        }
+      }
+    }).finally(() => {
+      setLoadingCats(false);
+    });
+  }, [open, defaultAccountId, editTransaction]);
+
   // Populate form when editing
   useEffect(() => {
     if (editTransaction) {
@@ -69,6 +101,7 @@ export function TransactionModal({
       setTime(editTransaction.time ?? "");
       setDescription(editTransaction.description);
       setCategoryId(editTransaction.category_id ?? null);
+      setAccountId(editTransaction.account_id || "");
       setReceivedFrom(editTransaction.received_from ?? "");
       setNote(editTransaction.note ?? "");
     } else {
@@ -83,16 +116,6 @@ export function TransactionModal({
     }
     setError(null);
   }, [editTransaction, defaultType, open]);
-
-  // Load categories
-  useEffect(() => {
-    if (!open) return;
-    setLoadingCats(true);
-    getCategories()
-      .then(setCategories)
-      .catch(console.error)
-      .finally(() => setLoadingCats(false));
-  }, [open]);
 
   // Close on Escape
   useEffect(() => {
@@ -149,6 +172,7 @@ export function TransactionModal({
       time: time || null,
       description: description.trim(),
       category_id: activeTab === "expense" ? categoryId : null,
+      account_id: accountId || null,
       received_from: activeTab === "income" ? (receivedFrom.trim() || null) : null,
       note: note.trim() || null,
     };
@@ -167,7 +191,7 @@ export function TransactionModal({
     } finally {
       setLoading(false);
     }
-  }, [amount, date, time, description, categoryId, receivedFrom, note, activeTab, isEditing, editTransaction, onSaved, onClose]);
+  }, [amount, date, time, description, categoryId, accountId, receivedFrom, note, activeTab, isEditing, editTransaction, onSaved, onClose]);
 
   if (!open) return null;
 
@@ -251,6 +275,31 @@ export function TransactionModal({
               />
             </div>
           </div>
+
+          {/* Account Selector */}
+          {accounts.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Account <span className="text-expense">*</span>
+              </label>
+              <select
+                id="txn-account"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2.5 rounded-xl text-sm font-medium",
+                  "bg-muted border border-border text-foreground",
+                  "focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                )}
+              >
+                {accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.icon} {acc.name} ({acc.type === "MAIN" ? "Main Account" : "Secondary Account"})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Date + Time row */}
           <div className="grid grid-cols-2 gap-3">
@@ -471,3 +520,4 @@ export function TransactionModal({
     </div>
   );
 }
+

@@ -30,8 +30,9 @@ import {
 } from "@/lib/analytics";
 import { softDeleteTransaction, restoreTransaction } from "@/lib/supabase/transactions";
 import { getCategories } from "@/lib/supabase/categories";
+import { getAccounts } from "@/lib/supabase/accounts";
 import { formatINR, toISODateString, getCurrentMonthRange } from "@/lib/dateUtils";
-import type { Transaction, Category, TransactionType } from "@/types/database";
+import type { Transaction, Category, TransactionType, Account } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 /* ── Filter Bar ── */
@@ -168,9 +169,11 @@ export function AnalysisPageClient() {
   const [customFrom, setCustomFrom] = useState(currentMonth.from);
   const [customTo, setCustomTo] = useState(toISODateString());
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>("");
+  const [accountScope, setAccountScope] = useState<string>("MAIN");
 
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Search and sub-filter for History table
@@ -197,18 +200,20 @@ export function AnalysisPageClient() {
         customTo,
         selectedMonthKey,
       });
-      const [result, cats] = await Promise.all([
-        getAnalyticsData(from, to),
+      const [result, cats, accs] = await Promise.all([
+        getAnalyticsData(from, to, accountScope),
         getCategories().catch(() => []),
+        getAccounts().catch(() => []),
       ]);
       setData(result);
       setCategories(cats);
+      setAccounts(accs);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [filter, customFrom, customTo, selectedMonthKey]);
+  }, [filter, customFrom, customTo, selectedMonthKey, accountScope]);
 
   useEffect(() => {
     load();
@@ -315,7 +320,7 @@ export function AnalysisPageClient() {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-sm space-y-2">
+      <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
           <Filter size={13} className="text-accent" />
           <span>Select Period</span>
@@ -331,6 +336,66 @@ export function AnalysisPageClient() {
             setCustomTo(t);
           }}
         />
+
+        {/* Account Scope Selector */}
+        {accounts.length > 0 && (
+          <div className="pt-3 border-t border-border/60">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Account Scope
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {accountScope === "MAIN"
+                  ? "Main Account Only (SBI)"
+                  : accountScope === "ALL"
+                  ? "All Accounts Combined"
+                  : `Filtered: ${accounts.find((a) => a.id === accountScope)?.name || "Account"}`}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setAccountScope("MAIN")}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all",
+                  accountScope === "MAIN"
+                    ? "bg-accent text-white shadow-sm shadow-accent/25"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                🏦 Main Account Only
+              </button>
+              <button
+                onClick={() => setAccountScope("ALL")}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all",
+                  accountScope === "ALL"
+                    ? "bg-foreground text-background"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                🌐 All Accounts
+              </button>
+              {accounts.map((acc) => (
+                <button
+                  key={acc.id}
+                  onClick={() => setAccountScope(acc.id)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5",
+                    accountScope === acc.id
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span>{acc.icon || "🏦"}</span>
+                  <span>{acc.name}</span>
+                  <span className="text-[10px] opacity-70">
+                    ({acc.type === "MAIN" ? "Main" : "Sec"})
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Totals Section */}
