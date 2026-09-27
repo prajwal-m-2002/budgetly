@@ -188,6 +188,9 @@ export async function getAllActiveTransactions(
   return hydrateAccounts((data as Transaction[]) ?? []);
 }
 
+const isUUID = (str?: string | null) =>
+  !!str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+
 /** Insert a new transaction */
 export async function createTransaction(
   values: TransactionInsert
@@ -203,11 +206,17 @@ export async function createTransaction(
     resolvedAccountId = mainAcc.id;
   }
 
-  const insertPayload = {
+  // Only pass account_id to PostgreSQL if it is a valid UUID
+  const insertPayload: Record<string, any> = {
     ...values,
-    account_id: resolvedAccountId,
     user_id: user.id,
   };
+
+  if (isUUID(resolvedAccountId)) {
+    insertPayload.account_id = resolvedAccountId;
+  } else {
+    delete insertPayload.account_id;
+  }
 
   const { data, error } = await supabase
     .from("transactions")
@@ -217,10 +226,11 @@ export async function createTransaction(
 
   if (error) {
     console.warn("createTransaction primary error, attempting fallback:", error.message || error);
-    // If account_id column is not yet in schema cache, try inserting without account_id
+    // Strip account_id completely for fallback insert
+    const { account_id, ...valuesWithoutAccount } = values as any;
     const { data: fallback, error: fallbackError } = await supabase
       .from("transactions")
-      .insert({ ...values, user_id: user.id })
+      .insert({ ...valuesWithoutAccount, user_id: user.id })
       .select("*")
       .single();
 
@@ -242,9 +252,14 @@ export async function updateTransaction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  const updatePayload: Record<string, any> = { ...values };
+  if (updatePayload.account_id && !isUUID(updatePayload.account_id)) {
+    delete updatePayload.account_id;
+  }
+
   const { data, error } = await supabase
     .from("transactions")
-    .update(values)
+    .update(updatePayload)
     .eq("id", id)
     .eq("user_id", user.id)
     .select("*, categories(*)")
@@ -252,9 +267,10 @@ export async function updateTransaction(
 
   if (error) {
     console.warn("updateTransaction primary error, attempting fallback:", error.message || error);
+    const { account_id, ...valuesWithoutAccount } = values as any;
     const { data: fallback, error: fallbackError } = await supabase
       .from("transactions")
-      .update(values)
+      .update(valuesWithoutAccount)
       .eq("id", id)
       .eq("user_id", user.id)
       .select("*")

@@ -18,6 +18,17 @@ export const DEFAULT_ACCOUNTS: Omit<Account, "id" | "user_id" | "created_at" | "
   },
 ];
 
+function generateUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 /**
  * Helper to sync accounts to Supabase Auth User Metadata
  * ensuring cloud persistence across devices even without DB migration.
@@ -111,7 +122,7 @@ export async function getAccounts(): Promise<Account[]> {
   // 4. Initial Seed in User Metadata & LocalStorage
   const now = new Date().toISOString();
   const seededAccounts: Account[] = DEFAULT_ACCOUNTS.map((acc, idx) => ({
-    id: `acc_default_${acc.name.toLowerCase()}_${user.id.slice(0, 8)}_${idx}`,
+    id: generateUUID(),
     user_id: user.id,
     name: acc.name,
     type: acc.type,
@@ -141,7 +152,7 @@ export async function getMainAccount(): Promise<Account> {
   if (accounts.length > 0) return accounts[0];
 
   return {
-    id: "default_sbi_main",
+    id: generateUUID(),
     user_id: "",
     name: "SBI",
     type: "MAIN",
@@ -213,7 +224,7 @@ export async function createAccount(values: AccountInsert): Promise<Account> {
     : existing;
 
   const newAccount: Account = {
-    id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: generateUUID(),
     user_id: user.id,
     name,
     type,
