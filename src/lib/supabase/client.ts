@@ -2,7 +2,7 @@ import { createBrowserClient } from "@supabase/ssr";
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://ppmdhggwdwymbfxhnkpg.supabase.co";
+  "https://gkppjknrjciymcoorrjt.supabase.co";
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
