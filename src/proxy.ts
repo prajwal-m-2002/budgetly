@@ -7,7 +7,7 @@ const supabaseUrl =
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "sb_publishable_-IoaS7X5yj2U34jM4ZuPiw_MhPsfoLK";
+  "sb_publishable_M3xMEMLW3_RUhBImWwytXw_nd9ysaPT";
 
 // Routes that don't require authentication
 const PUBLIC_ROUTES = ["/login", "/register", "/auth/callback"];
