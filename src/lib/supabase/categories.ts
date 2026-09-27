@@ -73,10 +73,14 @@ export async function updateCategory(
   values: Partial<Pick<Category, "name" | "icon" | "color">>
 ): Promise<Category> {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
   const { data, error } = await supabase
     .from("categories")
     .update(values)
     .eq("id", id)
+    .eq("user_id", user.id)
     .select()
     .single();
 
@@ -86,6 +90,13 @@ export async function updateCategory(
 
 export async function deleteCategory(id: string): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("categories").delete().eq("id", id);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { error } = await supabase
+    .from("categories")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
   if (error) throw error;
 }

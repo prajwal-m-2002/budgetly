@@ -28,6 +28,7 @@ export function BottomNav() {
               key={href}
               href={href}
               id={`bottom-nav-${label.toLowerCase()}`}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex flex-col items-center gap-1 px-4 py-2 rounded-xl min-w-[64px]",
                 "transition-all duration-200 group",

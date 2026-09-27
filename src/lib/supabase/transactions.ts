@@ -239,10 +239,14 @@ export async function updateTransaction(
   values: TransactionUpdate
 ): Promise<Transaction> {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
   const { data, error } = await supabase
     .from("transactions")
     .update(values)
     .eq("id", id)
+    .eq("user_id", user.id)
     .select("*, categories(*)")
     .single();
 
@@ -252,6 +256,7 @@ export async function updateTransaction(
       .from("transactions")
       .update(values)
       .eq("id", id)
+      .eq("user_id", user.id)
       .select("*")
       .single();
 
@@ -267,10 +272,14 @@ export async function updateTransaction(
 /** Soft-delete a transaction */
 export async function softDeleteTransaction(id: string): Promise<void> {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
   const { error } = await supabase
     .from("transactions")
     .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) throw error;
 }
@@ -278,10 +287,14 @@ export async function softDeleteTransaction(id: string): Promise<void> {
 /** Undo a soft-delete */
 export async function restoreTransaction(id: string): Promise<void> {
   const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
   const { error } = await supabase
     .from("transactions")
     .update({ deleted_at: null })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) throw error;
 }

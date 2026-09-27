@@ -20,7 +20,7 @@ export function exportToCSV(transactions: Transaction[], filename = "budgetly-tr
     t.date,
     `"${t.accounts?.name || "Main Account"}"`,
     t.type.toUpperCase(),
-    t.categories?.name || "Uncategorized",
+    `"${(t.categories?.name || "Uncategorized").replace(/"/g, '""')}"`,
     `"${(t.description || "").replace(/"/g, '""')}"`,
     t.type === "expense" ? -Math.abs(Number(t.amount)) : Number(t.amount),
     `"${(t.note || "").replace(/"/g, '""')}"`,

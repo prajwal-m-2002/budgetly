@@ -139,8 +139,8 @@ export function TransactionList({ transactions, onEdit, onDelete }: TransactionL
                   </p>
                 </div>
 
-                {/* Actions — appear on hover */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                {/* Actions — visible on touch/mobile, hover on desktop */}
+                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <button
                     id={`btn-edit-${t.id}`}
                     onClick={() => onEdit(t)}

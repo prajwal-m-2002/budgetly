@@ -12,18 +12,7 @@ export async function getMonthlyBudget(year: number, month: number): Promise<num
 
   const monthKey = `${year}_${month}`;
 
-  // 1. Try Supabase Auth User Metadata (Cloud persistent per user across devices)
-  const metaBudgets = user.user_metadata?.monthly_budgets as Record<string, number> | undefined;
-  if (metaBudgets && typeof metaBudgets[monthKey] === "number") {
-    const val = metaBudgets[monthKey];
-    // Sync to local cache
-    try {
-      localStorage.setItem(`budgetly_mb_${user.id}_${year}_${month}`, String(val));
-    } catch {}
-    return val;
-  }
-
-  // 2. Try Supabase Table if it exists
+  // 1. Try Supabase Table if it exists (primary source of truth)
   try {
     const { data, error } = await supabase
       .from("monthly_budgets")
@@ -41,6 +30,16 @@ export async function getMonthlyBudget(year: number, month: number): Promise<num
     }
   } catch {
     // Ignore table query failure
+  }
+
+  // 2. Try Supabase Auth User Metadata (Cloud persistent per user across devices)
+  const metaBudgets = user.user_metadata?.monthly_budgets as Record<string, number> | undefined;
+  if (metaBudgets && typeof metaBudgets[monthKey] === "number") {
+    const val = metaBudgets[monthKey];
+    try {
+      localStorage.setItem(`budgetly_mb_${user.id}_${year}_${month}`, String(val));
+    } catch {}
+    return val;
   }
 
   // 3. Fallback to user-isolated localStorage
