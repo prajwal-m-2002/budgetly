@@ -57,7 +57,7 @@ export function RegisterForm() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -69,6 +69,8 @@ export function RegisterForm() {
 
     if (error) {
       setError(error.message);
+    } else if (data?.session) {
+      window.location.href = "/";
     } else {
       setSuccess(true);
     }
